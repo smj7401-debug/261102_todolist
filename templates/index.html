@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+
+<form class="card add-form" method="post" action="{{ url_for('add') }}">
+  <input type="text" name="title" placeholder="할일을 입력하세요" required autofocus>
+  <select name="priority">
+    {% for key, label in priorities.items() %}
+      <option value="{{ key }}" {% if key == 'medium' %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <input type="date" name="due_date">
+  <button type="submit">추가</button>
+</form>
+
+<div class="progress">
+  <span>전체 {{ total }}개 · 완료 {{ done_count }}개</span>
+  <div class="bar"><div class="fill" style="width: {{ (done_count / total * 100) if total else 0 }}%"></div></div>
+</div>
+
+<div class="toolbar">
+  <nav class="tabs">
+    <a href="{{ url_for('index', status='all', q=q) }}" class="{% if status == 'all' %}active{% endif %}">전체</a>
+    <a href="{{ url_for('index', status='active', q=q) }}" class="{% if status == 'active' %}active{% endif %}">진행중</a>
+    <a href="{{ url_for('index', status='done', q=q) }}" class="{% if status == 'done' %}active{% endif %}">완료</a>
+  </nav>
+  <form method="get" class="search">
+    <input type="hidden" name="status" value="{{ status }}">
+    <input type="search" name="q" value="{{ q }}" placeholder="검색">
+  </form>
+</div>
+
+<ul class="todo-list">
+  {% for todo in todos %}
+    {% set overdue = todo.due_date and not todo.done and todo.due_date < today %}
+    <li class="card todo {% if todo.done %}done{% endif %}">
+      <form method="post" action="{{ url_for('toggle', todo_id=todo.id) }}">
+        <button class="check" title="완료 전환">{% if todo.done %}✔{% endif %}</button>
+      </form>
+      <div class="body">
+        <span class="title">{{ todo.title }}</span>
+        <div class="meta">
+          <span class="badge {{ todo.priority }}">{{ priorities[todo.priority] }}</span>
+          {% if todo.due_date %}
+            <span class="due {% if overdue %}overdue{% endif %}">📅 {{ todo.due_date }}{% if overdue %} (지남){% endif %}</span>
+          {% endif %}
+        </div>
+      </div>
+      <a class="btn-link" href="{{ url_for('edit', todo_id=todo.id) }}">수정</a>
+      <form method="post" action="{{ url_for('delete', todo_id=todo.id) }}" onsubmit="return confirm('삭제할까요?');">
+        <button class="btn-link danger">삭제</button>
+      </form>
+    </li>
+  {% else %}
+    <li class="empty">할일이 없습니다.</li>
+  {% endfor %}
+</ul>
+
+{% if done_count %}
+<form method="post" action="{{ url_for('clear_done') }}" onsubmit="return confirm('완료된 항목을 모두 삭제할까요?');">
+  <button class="clear">완료 항목 모두 삭제</button>
+</form>
+{% endif %}
+
+{% endblock %}

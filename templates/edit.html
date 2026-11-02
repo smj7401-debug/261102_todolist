@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+
+<form class="card edit-form" method="post">
+  <label>할일
+    <input type="text" name="title" value="{{ todo.title }}" required autofocus>
+  </label>
+  <label>우선순위
+    <select name="priority">
+      {% for key, label in priorities.items() %}
+        <option value="{{ key }}" {% if key == todo.priority %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>마감일
+    <input type="date" name="due_date" value="{{ todo.due_date or '' }}">
+  </label>
+  <div class="actions">
+    <a class="btn-link" href="{{ url_for('index') }}">취소</a>
+    <button type="submit">저장</button>
+  </div>
+</form>
+
+{% endblock %}

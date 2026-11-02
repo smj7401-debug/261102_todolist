@@ -1,0 +1,6 @@
+venv/
+__pycache__/
+*.pyc
+todos.db
+test_todos.db
+.claude/
