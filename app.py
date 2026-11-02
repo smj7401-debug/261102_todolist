@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from datetime import date
 from pathlib import Path
@@ -5,7 +6,8 @@ from pathlib import Path
 from flask import Flask, g, redirect, render_template, request, url_for
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "todos.db"
+# Vercel 서버리스 환경은 /tmp 외에는 쓰기가 불가능 (단, /tmp 데이터는 영구 보존되지 않음)
+DB_PATH = Path("/tmp/todos.db") if os.environ.get("VERCEL") else BASE_DIR / "todos.db"
 
 app = Flask(__name__)
 
