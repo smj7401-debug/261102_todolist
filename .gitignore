@@ -4,3 +4,4 @@ __pycache__/
 todos.db
 test_todos.db
 .claude/
+.env

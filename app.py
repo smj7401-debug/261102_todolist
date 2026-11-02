@@ -5,20 +5,69 @@ from pathlib import Path
 
 from flask import Flask, g, redirect, render_template, request, url_for
 
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
+
 BASE_DIR = Path(__file__).resolve().parent
-# Vercel 서버리스 환경은 /tmp 외에는 쓰기가 불가능 (단, /tmp 데이터는 영구 보존되지 않음)
-DB_PATH = Path("/tmp/todos.db") if os.environ.get("VERCEL") else BASE_DIR / "todos.db"
+# DATABASE_URL(Supabase Postgres 연결 문자열)이 있으면 Supabase에, 없으면 로컬 SQLite에 저장
+DATABASE_URL = os.environ.get("DATABASE_URL")
+USE_PG = bool(DATABASE_URL)
+DB_PATH = BASE_DIR / "todos.db"
 
 app = Flask(__name__)
 
 PRIORITIES = {"high": "높음", "medium": "보통", "low": "낮음"}
 
+SCHEMA_SQLITE = """
+CREATE TABLE IF NOT EXISTS todos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    priority TEXT NOT NULL DEFAULT 'medium',
+    due_date TEXT,
+    done INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+)
+"""
+
+SCHEMA_PG = """
+CREATE TABLE IF NOT EXISTS todos (
+    id BIGSERIAL PRIMARY KEY,
+    title TEXT NOT NULL,
+    priority TEXT NOT NULL DEFAULT 'medium',
+    due_date TEXT,
+    done INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+)
+"""
+
+
+def connect():
+    if USE_PG:
+        import psycopg
+        from psycopg.rows import dict_row
+
+        # Supabase 풀러(6543, transaction mode)는 prepared statement를 지원하지 않음
+        return psycopg.connect(DATABASE_URL, row_factory=dict_row, prepare_threshold=None)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
 
 def get_db():
     if "db" not in g:
-        g.db = sqlite3.connect(DB_PATH)
-        g.db.row_factory = sqlite3.Row
+        g.db = connect()
     return g.db
+
+
+def query(sql, params=()):
+    """SQLite 스타일(?) 쿼리를 실행. Postgres일 때는 %s로 바꿔서 실행."""
+    if USE_PG:
+        sql = sql.replace("?", "%s")
+    return get_db().execute(sql, params)
 
 
 @app.teardown_appcontext
@@ -29,19 +78,8 @@ def close_db(exc):
 
 
 def init_db():
-    with sqlite3.connect(DB_PATH) as db:
-        db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS todos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT NOT NULL,
-                priority TEXT NOT NULL DEFAULT 'medium',
-                due_date TEXT,
-                done INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
-            )
-            """
-        )
+    with connect() as db:
+        db.execute(SCHEMA_PG if USE_PG else SCHEMA_SQLITE)
 
 
 @app.route("/")
@@ -56,16 +94,16 @@ def index():
     elif status == "done":
         sql += " AND done = 1"
     if q:
-        sql += " AND title LIKE ?"
+        sql += " AND title ILIKE ?" if USE_PG else " AND title LIKE ?"
         params.append(f"%{q}%")
     sql += """
         ORDER BY done,
                  CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
                  due_date IS NULL, due_date, id DESC
     """
-    todos = get_db().execute(sql, params).fetchall()
+    todos = query(sql, params).fetchall()
 
-    counts = get_db().execute(
+    counts = query(
         "SELECT COUNT(*) AS total, COALESCE(SUM(done), 0) AS done FROM todos"
     ).fetchone()
 
@@ -89,27 +127,24 @@ def add():
     if title:
         if priority not in PRIORITIES:
             priority = "medium"
-        db = get_db()
-        db.execute(
+        query(
             "INSERT INTO todos (title, priority, due_date) VALUES (?, ?, ?)",
             (title, priority, due_date),
         )
-        db.commit()
+        get_db().commit()
     return redirect(url_for("index"))
 
 
 @app.post("/toggle/<int:todo_id>")
 def toggle(todo_id):
-    db = get_db()
-    db.execute("UPDATE todos SET done = 1 - done WHERE id = ?", (todo_id,))
-    db.commit()
+    query("UPDATE todos SET done = 1 - done WHERE id = ?", (todo_id,))
+    get_db().commit()
     return redirect(request.referrer or url_for("index"))
 
 
 @app.route("/edit/<int:todo_id>", methods=["GET", "POST"])
 def edit(todo_id):
-    db = get_db()
-    todo = db.execute("SELECT * FROM todos WHERE id = ?", (todo_id,)).fetchone()
+    todo = query("SELECT * FROM todos WHERE id = ?", (todo_id,)).fetchone()
     if todo is None:
         return redirect(url_for("index"))
 
@@ -120,11 +155,11 @@ def edit(todo_id):
         if title:
             if priority not in PRIORITIES:
                 priority = "medium"
-            db.execute(
+            query(
                 "UPDATE todos SET title = ?, priority = ?, due_date = ? WHERE id = ?",
                 (title, priority, due_date, todo_id),
             )
-            db.commit()
+            get_db().commit()
         return redirect(url_for("index"))
 
     return render_template("edit.html", todo=todo, priorities=PRIORITIES)
@@ -132,17 +167,15 @@ def edit(todo_id):
 
 @app.post("/delete/<int:todo_id>")
 def delete(todo_id):
-    db = get_db()
-    db.execute("DELETE FROM todos WHERE id = ?", (todo_id,))
-    db.commit()
+    query("DELETE FROM todos WHERE id = ?", (todo_id,))
+    get_db().commit()
     return redirect(request.referrer or url_for("index"))
 
 
 @app.post("/clear-done")
 def clear_done():
-    db = get_db()
-    db.execute("DELETE FROM todos WHERE done = 1")
-    db.commit()
+    query("DELETE FROM todos WHERE done = 1")
+    get_db().commit()
     return redirect(url_for("index"))
 
 
